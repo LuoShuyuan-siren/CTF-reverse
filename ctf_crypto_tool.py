@@ -1,10 +1,59 @@
 #!/usr/bin/env python3
-"""Offline CTF crypto helper implemented with Python standard library only."""
+"""Offline CTF crypto helper. Uses stdlib plus local openssl for AES/DES/SM4."""
 from __future__ import annotations
-import argparse, hashlib, itertools, string, sys
+import argparse, hashlib, itertools, shutil, string, subprocess, sys
 from math import gcd
 
 BLOCK_ALGS = {"aes":16,"des":8,"sm4":16}
+
+
+def block_size_for_alg(alg: str) -> int:
+    return 8 if alg == "des" else 16
+
+def cipher_name(alg: str, key: bytes, mode: str) -> str:
+    if alg == "aes":
+        if len(key) not in (16, 24, 32):
+            raise ValueError("AES key length must be 16, 24, or 32 bytes")
+        return f"aes-{len(key) * 8}-{mode}"
+    if alg == "des":
+        if len(key) != 8:
+            raise ValueError("DES key length must be 8 bytes")
+        return f"des-{mode}"
+    if alg == "sm4":
+        if len(key) != 16:
+            raise ValueError("SM4 key length must be 16 bytes")
+        return f"sm4-{mode}"
+    raise ValueError(f"unsupported block algorithm: {alg}")
+
+def parse_iv(iv_text: str | None, mode: str, bs: int) -> bytes:
+    if mode == "ecb":
+        return b""
+    if not iv_text:
+        raise ValueError("CBC mode requires --iv")
+    iv = decode_value(iv_text, "hex")
+    if len(iv) != bs:
+        raise ValueError(f"IV length must be {bs} bytes for this algorithm")
+    return iv
+
+def openssl_crypt(data: bytes, key: bytes, alg: str, mode: str, iv_text: str | None, padding: str, decrypt: bool) -> bytes:
+    if shutil.which("openssl") is None:
+        raise ValueError("AES/DES/SM4 require the local openssl command in this offline build")
+    bs = block_size_for_alg(alg)
+    name = cipher_name(alg, key, mode)
+    iv = parse_iv(iv_text, mode, bs)
+    payload = data if decrypt else apply_padding(data, bs, padding)
+    if len(payload) % bs:
+        raise ValueError("block cipher input length must be a block multiple after padding")
+    cmd = ["openssl", "enc", f"-{name}", "-nopad", "-nosalt", "-K", key.hex()]
+    if alg == "des":
+        cmd += ["-provider", "default", "-provider", "legacy"]
+    if mode == "cbc":
+        cmd += ["-iv", iv.hex()]
+    cmd.append("-d" if decrypt else "-e")
+    proc = subprocess.run(cmd, input=payload, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if proc.returncode != 0:
+        raise ValueError(proc.stderr.decode(errors="replace").strip() or f"openssl {name} failed")
+    return remove_padding(proc.stdout, bs, padding) if decrypt else proc.stdout
 
 
 def decode_value(value: str, typ: str) -> bytes:
@@ -118,12 +167,12 @@ def crypto(args):
         if alg == "xor": res=xor_bytes(p,k)
         elif alg == "rc4": res=rc4_crypt(p,k)
         elif alg == "affine": res=affine_encrypt(p,k)
-        elif alg in BLOCK_ALGS: raise ValueError(f"{alg.upper()} is declared for ECB/CBC + pkcs7/zero/none, but this offline stdlib-only build does not vendor a pure-Python implementation")
+        elif alg in BLOCK_ALGS: res=openssl_crypt(p,k,alg,args.mode,args.iv,args.padding,False)
     elif c is not None and k is not None:
         if alg == "xor": res=xor_bytes(c,k)
         elif alg == "rc4": res=rc4_crypt(c,k)
         elif alg == "affine": res=affine_decrypt(c,k)
-        elif alg in BLOCK_ALGS: raise ValueError(f"{alg.upper()} is declared for ECB/CBC + pkcs7/zero/none, but this offline stdlib-only build does not vendor a pure-Python implementation")
+        elif alg in BLOCK_ALGS: res=openssl_crypt(c,k,alg,args.mode,args.iv,args.padding,True)
     else:
         raise ValueError("unhandled argument combination")
     print(encode_value(res,args.output_type))

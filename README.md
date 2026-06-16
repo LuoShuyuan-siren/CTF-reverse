@@ -1,6 +1,6 @@
 # CTF Reverse 离线密码学工具
 
-本仓库提供 `ctf_crypto_tool.py`：一个面向 CTF / 逆向 / 离线考试环境的 Python 命令行工具。工具只依赖 Python 标准库，适合断网环境直接使用。
+本仓库提供 `ctf_crypto_tool.py`：一个面向 CTF / 逆向 / 离线考试环境的 Python 命令行工具。工具的 XOR、Affine、RC4、Hash 和爆破功能只依赖 Python 标准库；AES、DES、SM4 加解密通过系统本地 `openssl` 命令完成，不需要联网或安装 Python 第三方包。
 
 ## 快速开始
 
@@ -77,7 +77,7 @@ python ctf_crypto_tool.py crypto \
 - `--iv`：CBC 模式初始化向量。
 - `--padding`：填充方式，支持 `pkcs7`、`zero`、`none`，默认 `pkcs7`。
 
-> 说明：当前标准库离线版本完整实现了 XOR、Affine、RC4、MD5、SHA256。AES、DES、SM4 的命令参数已保留并文档化，但未 vendored 纯 Python 实现；执行加解密时会明确报错。对于 AES/DES/SM4，仅凭明文和密文无法唯一恢复密钥，工具会输出 `无法仅凭明文和密文唯一恢复密钥`。
+> 说明：当前离线版本完整实现了 XOR、Affine、RC4、MD5、SHA256；AES、DES、SM4 使用本机 `openssl` 命令执行 ECB/CBC 加解密，并由工具侧处理 `pkcs7`、`zero`、`none` 填充。对于 AES/DES/SM4，仅凭明文和密文无法唯一恢复密钥，工具会输出 `无法仅凭明文和密文唯一恢复密钥`。
 
 ### 2.1 XOR
 
@@ -154,13 +154,15 @@ RC4 加密和解密使用同一运算。RC4 不支持仅凭 `plaintext + ciphert
 
 ### 2.4 AES / DES / SM4
 
+AES、DES、SM4 支持 `ECB` / `CBC` 模式以及 `pkcs7` / `zero` / `none` 填充。密钥长度要求：AES 为 16/24/32 字节，DES 为 8 字节，SM4 为 16 字节；CBC 模式必须提供 `--iv`，IV 长度与分组长度一致（DES 为 8 字节，AES/SM4 为 16 字节）。
+
 #### 命令格式
 
 ```bash
-# 预留命令格式：明文 + 密钥 => 密文
+# 明文 + 密钥 => 密文
 python ctf_crypto_tool.py crypto --alg aes|des|sm4 --plaintext <明文> --key <密钥> --mode ecb|cbc --iv <IV> --padding pkcs7|zero|none --output-type hex
 
-# 预留命令格式：密文 + 密钥 => 明文
+# 密文 + 密钥 => 明文
 python ctf_crypto_tool.py crypto --alg aes|des|sm4 --ciphertext <密文> --ciphertext-type hex --key <密钥> --mode ecb|cbc --iv <IV> --padding pkcs7|zero|none --output-type text
 
 # 明文 + 密文 => 密钥：不可唯一恢复
@@ -175,7 +177,7 @@ python ctf_crypto_tool.py crypto --alg des --ciphertext <hex密文> --key 012345
 python ctf_crypto_tool.py crypto --alg sm4 --plaintext hello --ciphertext <hex密文> --ciphertext-type hex
 ```
 
-当前离线标准库版本未内置 AES/DES/SM4 纯 Python 加解密实现，因此加解密会报错说明未 vendored 实现；密钥恢复会报错说明无法唯一恢复。
+AES/DES/SM4 已支持使用本机 `openssl` 执行加解密；如果运行环境没有 `openssl` 命令，工具会明确报错。密钥恢复仍会报错说明无法仅凭明文和密文唯一恢复。
 
 ## 3. Hash 计算：`hash`
 
@@ -241,6 +243,6 @@ python ctf_crypto_tool.py hash-bruteforce --alg md5 --hash <目标hash> --length
 | XOR | 支持 | 支持 | 支持 |
 | Affine | 支持 | 支持 | 支持，爆破/恢复 `a b` |
 | RC4 | 支持 | 支持 | 不支持，无法唯一恢复 |
-| AES | 当前标准库版本未实现加解密 | 当前标准库版本未实现加解密 | 不支持，无法唯一恢复 |
-| DES | 当前标准库版本未实现加解密 | 当前标准库版本未实现加解密 | 不支持，无法唯一恢复 |
-| SM4 | 当前标准库版本未实现加解密 | 当前标准库版本未实现加解密 | 不支持，无法唯一恢复 |
+| AES | 支持，依赖本机 `openssl` | 支持，依赖本机 `openssl` | 不支持，无法唯一恢复 |
+| DES | 支持，依赖本机 `openssl` | 支持，依赖本机 `openssl` | 不支持，无法唯一恢复 |
+| SM4 | 支持，依赖本机 `openssl` | 支持，依赖本机 `openssl` | 不支持，无法唯一恢复 |
